@@ -1,0 +1,142 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'stage', 'prod'],
+            description: 'Choose environment'
+        )
+        choice(
+            name: 'ACTION',
+            choices: ['plan', 'apply', 'destroy'],
+            description: 'Terraform action'
+        )
+    }
+
+    environment {
+        TF_DIR = "terraform-2apps/environments/${params.ENVIRONMENT}"
+        TF_TARGETS = [
+            '-target=module.birdwatching',
+            '-target=module.vpc',
+            '-target=module.iam',
+            '-target=module.eks'
+        ].join(' ')
+    }
+
+    stages {
+        stage('Check Tools') {
+            steps {
+                sh 'terraform version'
+                sh 'aws sts get-caller-identity'
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                git(
+                    url: 'https://github.com/INITOPS-TEAM/terraform-bird-watching-buried-marks.git',
+                    branch: 'main'
+                )
+            }
+        }
+
+        stage('Approve') {
+            when {
+                anyOf {
+                    expression { return params.ACTION == 'apply' && params.ENVIRONMENT == 'prod' }
+                    expression { return params.ACTION == 'destroy' }
+                }
+            }
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    input message: "ACTION=${params.ACTION} on ${params.ENVIRONMENT}. Continue?",
+                          ok: 'Yes, proceed'
+                }
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir("${TF_DIR}") {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ssh-public-key-file',
+                        variable: 'SSH_KEY_PATH'
+                    )
+                ]) {
+                    dir("${TF_DIR}") {
+                        sh """
+                            terraform plan \
+                                ${TF_TARGETS} \
+                                -var="public_key_path=${SSH_KEY_PATH}" \
+                                -out=tfplan
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            when {
+                expression { return params.ACTION == 'apply' }
+            }
+            steps {
+                dir("${TF_DIR}") {
+                    sh 'terraform apply -auto-approve tfplan'
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            when {
+                expression { return params.ACTION == 'destroy' }
+            }
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ssh-public-key-file',
+                        variable: 'SSH_KEY_PATH'
+                    )
+                ]) {
+                    dir("${TF_DIR}") {
+                        sh """
+                            terraform destroy \
+                                -target=module.birdwatching.aws_instance.lb \
+                                -target=module.birdwatching.aws_instance.app \
+                                -target=module.birdwatching.aws_instance.db \
+                                -target=module.birdwatching.aws_instance.consul \
+                                -target=module.vpc.aws_nat_gateway.this \
+                                -target=module.vpc.aws_eip.nat \
+                                -target=module.eks \
+                                -var="public_key_path=${SSH_KEY_PATH}" \
+                                -auto-approve
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Terraform ${params.ACTION} completed for ${params.ENVIRONMENT}"
+        }
+        failure {
+            echo "Terraform ${params.ACTION} failed for ${params.ENVIRONMENT}"
+        }
+        always {
+            dir("${TF_DIR}") {
+                sh 'rm -f tfplan'
+            }
+            cleanWs()
+        }
+    }
+}
