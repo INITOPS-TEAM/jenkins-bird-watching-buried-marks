@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'stage', 'prod'],
+            description: 'Choose environment'
+        )
+    }
+
+    environment {
+        AWS_REGION       = 'eu-north-1'
+        EKS_CLUSTER_NAME = 'buried-marks-eks-dev'
+        KUBE_NAMESPACE   = "buried-marks-${params.ENVIRONMENT}"
+        HELM_REPO_URL    = 'https://github.com/INITOPS-TEAM/buried-marks-helm-infrastructure.git'
+    }
+
+    stages {
+
+        stage('Check Tools') {
+            steps {
+                sh 'aws --version'
+                sh 'helm version --short'
+                sh 'kubectl version --client --short'
+		sh 'helmfile --version'
+            }
+        }
+
+        stage('Approve Production') {
+            when {
+                expression { return params.ENVIRONMENT == 'prod' }
+            }
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    input message: "Deploy to PRODUCTION. Continue?", ok: 'Yes, deploy'
+                }
+            }
+        }
+
+        stage('Checkout Helm Charts') {
+            steps {
+                dir('helm-charts') {
+                    git(
+                        url: "${HELM_REPO_URL}",
+                        branch: 'main',
+                    )
+                }
+            }
+        }
+
+        stage('Configure kubectl') {
+            steps {
+                sh """
+                    aws eks update-kubeconfig \
+                        --region ${AWS_REGION} \
+                        --name ${EKS_CLUSTER_NAME}
+
+                    kubectl create namespace ${KUBE_NAMESPACE} \
+                        --dry-run=client -o yaml | kubectl apply -f -
+                """
+            }
+        }
+
+        stage('Helm Deploy') {
+            steps {
+                dir('helm-charts') {
+                    sh """
+                       helmfile --environment ${params.ENVIRONMENT} apply \
+                            --args "--atomic --timeout 10m" 
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployed to ${KUBE_NAMESPACE}"
+        }
+        failure {
+            echo "Deploy failed for ${KUBE_NAMESPACE}"
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
