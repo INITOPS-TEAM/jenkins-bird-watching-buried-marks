@@ -1,6 +1,15 @@
 # Bird-Watching & Buried Marks CI/CD Pipelines
 
-This repository contains the Jenkins pipelines (`Jenkinsfile`) used to automate the infrastructure provisioning (Terraform) and application deployment (Helmfile/Kubernetes) for the Bird-Watching and Buried Marks applications.
+This repository contains the Jenkins pipelines (`Jenkinsfile`) used to automate the infrastructure provisioning (Terraform) and application deployment for the Bird-Watching and Buried Marks applications.
+
+# How to Run the Pipeline
+The pipeline is fully parameterized. When you trigger a build in Jenkins, you will be prompted to select the following:
+
+- Environment(dev, stage or prod)
+- Action:
+    -  plan - generates and displays executive plan
+    - apply - Applies changes to reach the desired state (requires manual approval for prod)
+    - destroy - Destroys the managed infrastructure (generates a destroy plan and requires manual approval)
 
 ## Prerequisites
 

@@ -36,21 +36,6 @@ pipeline {
             }
         }
 
-        stage('Approve') {
-            when {
-                anyOf {
-                    expression { return params.ACTION == 'apply' && params.ENVIRONMENT == 'prod' }
-                    expression { return params.ACTION == 'destroy' }
-                }
-            }
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    input message: "ACTION=${params.ACTION} on ${params.ENVIRONMENT}. Continue?",
-                          ok: 'Yes, proceed'
-                }
-            }
-        }
-
         stage('Terraform Init') {
             steps {
                 dir("${TF_DIR}") {
@@ -59,7 +44,7 @@ pipeline {
             }
         }
 
-        stage('Terraform Plan') {
+	stage('Terraform Plan') {
             steps {
                 withCredentials([
                     file(
@@ -68,11 +53,60 @@ pipeline {
                     )
                 ]) {
                     dir("${TF_DIR}") {
-                        sh """
-                            terraform plan \
-                                -var="public_key_path=${SSH_KEY_PATH}" \
-                                -out=tfplan
-                        """
+                        script {
+                            if (params.ACTION == 'destroy') {
+                                sh """
+                                    terraform plan -destroy \
+                                        -target=module.birdwatching.aws_instance.lb \
+                                        -target=module.birdwatching.aws_instance.app \
+                                        -target=module.birdwatching.aws_instance.db \
+                                        -target=module.birdwatching.aws_instance.consul \
+                                        -target=module.eks \
+                                        -var="public_key_path=${SSH_KEY_PATH}" \
+                                        -out=tfplan
+                                """
+                            } else {
+                                sh """
+                                    terraform plan \
+                                        -var="public_key_path=${SSH_KEY_PATH}" \
+                                        -out=tfplan
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+	stage('Terraform Plan') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ssh-public-key-file',
+                        variable: 'SSH_KEY_PATH'
+                    )
+                ]) {
+                    dir("${TF_DIR}") {
+                        script {
+                            if (params.ACTION == 'destroy') {
+                                sh """
+                                    terraform plan -destroy \
+                                        -target=module.birdwatching.aws_instance.lb \
+                                        -target=module.birdwatching.aws_instance.app \
+                                        -target=module.birdwatching.aws_instance.db \
+                                        -target=module.birdwatching.aws_instance.consul \
+                                        -target=module.eks \
+                                        -var="public_key_path=${SSH_KEY_PATH}" \
+                                        -out=tfplan
+                                """
+                            } else {
+                                sh """
+                                    terraform plan \
+                                        -var="public_key_path=${SSH_KEY_PATH}" \
+                                        -out=tfplan
+                                """
+                            }
+                        }
                     }
                 }
             }
@@ -84,7 +118,7 @@ pipeline {
             }
             steps {
                 dir("${TF_DIR}") {
-                    sh 'terraform apply -auto-approve tfplan'
+                    sh 'terraform apply tfplan'
                 }
             }
         }
@@ -94,24 +128,8 @@ pipeline {
                 expression { return params.ACTION == 'destroy' }
             }
             steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'ssh-public-key-file',
-                        variable: 'SSH_KEY_PATH'
-                    )
-                ]) {
-                    dir("${TF_DIR}") {
-                        sh """
-                            terraform destroy \
-                                -target=module.birdwatching.aws_instance.lb \
-                                -target=module.birdwatching.aws_instance.app \
-                                -target=module.birdwatching.aws_instance.db \
-                                -target=module.birdwatching.aws_instance.consul \
-                                -target=module.eks \
-                                -var="public_key_path=${SSH_KEY_PATH}" \
-                                -auto-approve
-                        """
-                    }
+                dir("${TF_DIR}") {
+                    sh 'terraform apply tfplan'
                 }
             }
         }
