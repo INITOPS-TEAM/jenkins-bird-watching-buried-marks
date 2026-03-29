@@ -16,23 +16,18 @@ pipeline {
 
     environment {
         TF_DIR = "terraform-2apps/environments/${params.ENVIRONMENT}"
-        TF_TARGETS = [
-            '-target=module.birdwatching',
-            '-target=module.vpc',
-            '-target=module.iam',
-            '-target=module.eks'
-        ].join(' ')
+        AWS_REGION = 'eu-north-1'
     }
 
     stages {
         stage('Check Tools') {
             steps {
                 sh 'terraform version'
-                sh 'aws sts get-caller-identity'
+                sh 'aws --version'
             }
         }
 
-        stage('Checkout') {
+        stage('Checkout Terraform') {
             steps {
                 git(
                     url: 'https://github.com/INITOPS-TEAM/terraform-bird-watching-buried-marks.git',
@@ -75,7 +70,6 @@ pipeline {
                     dir("${TF_DIR}") {
                         sh """
                             terraform plan \
-                                ${TF_TARGETS} \
                                 -var="public_key_path=${SSH_KEY_PATH}" \
                                 -out=tfplan
                         """
@@ -113,8 +107,6 @@ pipeline {
                                 -target=module.birdwatching.aws_instance.app \
                                 -target=module.birdwatching.aws_instance.db \
                                 -target=module.birdwatching.aws_instance.consul \
-                                -target=module.vpc.aws_nat_gateway.this \
-                                -target=module.vpc.aws_eip.nat \
                                 -target=module.eks \
                                 -var="public_key_path=${SSH_KEY_PATH}" \
                                 -auto-approve
@@ -127,15 +119,12 @@ pipeline {
 
     post {
         success {
-            echo "Terraform ${params.ACTION} completed for ${params.ENVIRONMENT}"
+            echo "Pipeline ${params.ACTION} completed successfully for ${params.ENVIRONMENT}"
         }
         failure {
-            echo "Terraform ${params.ACTION} failed for ${params.ENVIRONMENT}"
+            echo "Pipeline ${params.ACTION} FAILED for ${params.ENVIRONMENT}"
         }
         always {
-            dir("${TF_DIR}") {
-                sh 'rm -f tfplan'
-            }
             cleanWs()
         }
     }
