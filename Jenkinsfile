@@ -42,41 +42,7 @@ pipeline {
                     sh 'terraform init'
                 }
             }
-        }
-
-	stage('Terraform Plan') {
-            steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'ssh-public-key-file',
-                        variable: 'SSH_KEY_PATH'
-                    )
-                ]) {
-                    dir("${TF_DIR}") {
-                        script {
-                            if (params.ACTION == 'destroy') {
-                                sh """
-                                    terraform plan -destroy \
-                                        -target=module.birdwatching.aws_instance.lb \
-                                        -target=module.birdwatching.aws_instance.app \
-                                        -target=module.birdwatching.aws_instance.db \
-                                        -target=module.birdwatching.aws_instance.consul \
-                                        -target=module.eks \
-                                        -var="public_key_path=${SSH_KEY_PATH}" \
-                                        -out=tfplan
-                                """
-                            } else {
-                                sh """
-                                    terraform plan \
-                                        -var="public_key_path=${SSH_KEY_PATH}" \
-                                        -out=tfplan
-                                """
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        }	
 
 	stage('Terraform Plan') {
             steps {
