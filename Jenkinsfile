@@ -78,6 +78,17 @@ pipeline {
             }
         }
 
+	stage('Approval') {
+            when {
+                expression { return params.ACTION == 'apply' || params.ACTION == 'destroy' }
+            }
+            steps {
+                script {
+                    input message: "Review the Terraform Plan. Do you approve the ${params.ACTION} for ${params.ENVIRONMENT} environment?", ok: "Approve"
+                }
+            }
+        }
+
         stage('Terraform Apply') {
             when {
                 expression { return params.ACTION == 'apply' }
@@ -88,6 +99,30 @@ pipeline {
                 }
             }
         }
+
+	stage('Deploy Landing Page') {
+            when {
+                expression { return params.ACTION == 'apply' }
+            }
+            steps {
+                script {
+                    dir("${TF_DIR}") {
+                        env.S3_BUCKET = sh(script: 'terraform output -raw landing_s3_bucket_name', returnStdout: true).trim()
+                        env.CF_DIST_ID = sh(script: 'terraform output -raw landing_cloudfront_id', returnStdout: true).trim()
+                    }
+
+                   dir('landing-workspace') {
+                        git branch: 'main', url: 'https://github.com/INITOPS-TEAM/landing-page-bird-watching-buried-marks.git'
+
+                        sh """
+                            echo "Deploying dir landing-page/ to ${env.S3_BUCKET}..."
+                            aws s3 sync landing-page/ s3://${env.S3_BUCKET} --delete
+                            aws cloudfront create-invalidation --distribution-id ${env.CF_DIST_ID} --paths "/*"
+                        """
+                    } 
+                }
+            }
+        } 
 
         stage('Terraform Destroy') {
             when {
